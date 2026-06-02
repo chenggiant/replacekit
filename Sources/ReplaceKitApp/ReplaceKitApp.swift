@@ -2,10 +2,16 @@ import SwiftUI
 
 @main
 struct ReplaceKitApp: App {
+    @State private var model = AppModel.live()
+
     var body: some Scene {
         WindowGroup {
-            Text("ReplaceKit")
-                .frame(minWidth: 720, minHeight: 480)
+            ContentView(model: model)
+                .frame(minWidth: 900, minHeight: 560)
+                .task {
+                    model.refresh()
+                    model.createDailySnapshotIfEnabled()
+                }
         }
     }
 }

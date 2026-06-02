@@ -126,11 +126,55 @@ func testReplacementDiff() {
 }
 
 @MainActor
+func testMacPreferencesAndFallback() throws {
+    let reader = GlobalDefaultsTextReplacementReader(loadRecords: {
+        [
+            ["replace": ".ph", "with": 91471286, "on": 1],
+            ["replace": "omw", "with": "On my way!", "on": 1],
+        ]
+    })
+    let observed = try reader.fetchAll()
+    check(
+        observed == [
+            TextReplacement(shortcut: ".ph", phrase: "91471286"),
+            TextReplacement(shortcut: "omw", phrase: "On my way!"),
+        ],
+        "global defaults reader converts observed macOS records"
+    )
+    checkThrows("global defaults reader reports missing preference") {
+        _ = try GlobalDefaultsTextReplacementReader(loadRecords: { nil }).fetchAll()
+    }
+
+    let suite = "replacekit-tests-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let preference = BackupFolderPreference(defaults: defaults)
+    let folder = temporaryFolder()
+    preference.save(folder)
+    check(preference.load() == folder, "backup folder preference persists selected path")
+
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fallbackURL = try ManualImportService().export(
+        [TextReplacement(shortcut: ".fallback", phrase: "Fallback")],
+        to: folder
+    )
+    let fallbackData = try Data(contentsOf: fallbackURL)
+    let decodedFallback = try TextReplacementPlistCodec().decode(fallbackData)
+    check(
+        decodedFallback == [
+            TextReplacement(shortcut: ".fallback", phrase: "Fallback"),
+        ],
+        "manual fallback writes Apple-compatible plist"
+    )
+}
+
+@MainActor
 func run() throws {
     try testPlistCodec()
     try testConfigurationStore()
     try testSnapshotStore()
     testReplacementDiff()
+    try testMacPreferencesAndFallback()
 }
 
 do {

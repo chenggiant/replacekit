@@ -168,17 +168,144 @@ func testMacPreferencesAndFallback() throws {
     )
 }
 
+final class InMemoryGateway: TextReplacementReading, TextReplacementWriting, @unchecked Sendable {
+    private var replacements: [TextReplacement]
+    private let writeError: Error?
+    private(set) var writeCount = 0
+
+    init(_ replacements: [TextReplacement], writeError: Error? = nil) {
+        self.replacements = replacements
+        self.writeError = writeError
+    }
+
+    func fetchAll() throws -> [TextReplacement] {
+        replacements.sorted { $0.shortcut < $1.shortcut }
+    }
+
+    func add(_ replacement: TextReplacement) async throws {
+        writeCount += 1
+        if let writeError { throw writeError }
+        replacements.append(replacement)
+    }
+
+    func update(originalShortcut: String, replacement: TextReplacement) async throws {
+        writeCount += 1
+        if let writeError { throw writeError }
+        replacements.removeAll { $0.shortcut == originalShortcut }
+        replacements.append(replacement)
+    }
+
+    func delete(shortcut: String) async throws {
+        writeCount += 1
+        if let writeError { throw writeError }
+        replacements.removeAll { $0.shortcut == shortcut }
+    }
+}
+
+final class RecordingSnapshotWriter: SnapshotWriting, @unchecked Sendable {
+    private let error: Error?
+    private(set) var reasons: [SnapshotReason] = []
+
+    init(error: Error? = nil) {
+        self.error = error
+    }
+
+    func write(
+        replacements: [TextReplacement],
+        configuration: ReplaceKitConfiguration,
+        reason: SnapshotReason
+    ) throws {
+        if let error { throw error }
+        reasons.append(reason)
+    }
+}
+
+enum TestError: Error {
+    case backupFolderUnavailable
+    case writerFailure
+}
+
 @MainActor
-func run() throws {
+func testApplyCoordinator() async throws {
+    let gateway = InMemoryGateway([TextReplacement(shortcut: ".a", phrase: "old")])
+    let snapshots = RecordingSnapshotWriter()
+    let coordinator = ApplyCoordinator(reader: gateway, writer: gateway, snapshots: snapshots)
+    let result = try await coordinator.apply(
+        .update(originalShortcut: ".a", replacement: .init(shortcut: ".a", phrase: "new")),
+        configuration: .init()
+    )
+
+    check(snapshots.reasons == [.beforeEdit], "routine edit snapshots before writing")
+    check(result.observed == [TextReplacement(shortcut: ".a", phrase: "new")], "routine edit verifies observed state")
+
+    let unprotectedGateway = InMemoryGateway([])
+    let unavailableSnapshots = RecordingSnapshotWriter(error: TestError.backupFolderUnavailable)
+    let unprotectedCoordinator = ApplyCoordinator(
+        reader: unprotectedGateway,
+        writer: unprotectedGateway,
+        snapshots: unavailableSnapshots
+    )
+    _ = try await unprotectedCoordinator.apply(
+        .add(.init(shortcut: ".once", phrase: "Once")),
+        configuration: .init(),
+        protection: .unprotectedOnce
+    )
+    check(unprotectedGateway.writeCount == 1, "explicit one-time unprotected edit bypasses snapshot failure")
+
+    let protectedGateway = InMemoryGateway([])
+    let protectedCoordinator = ApplyCoordinator(
+        reader: protectedGateway,
+        writer: protectedGateway,
+        snapshots: unavailableSnapshots
+    )
+    do {
+        _ = try await protectedCoordinator.apply(
+            .add(.init(shortcut: ".blocked", phrase: "Blocked")),
+            configuration: .init()
+        )
+        check(false, "missing backup protection blocks writes")
+    } catch ApplyCoordinatorError.snapshotUnavailable {
+        check(protectedGateway.writeCount == 0, "missing backup protection blocks writes")
+    }
+
+    let changedGateway = InMemoryGateway([TextReplacement(shortcut: ".a", phrase: "external")])
+    let changedCoordinator = ApplyCoordinator(reader: changedGateway, writer: changedGateway, snapshots: snapshots)
+    do {
+        _ = try await changedCoordinator.apply(
+            proposed: [TextReplacement(shortcut: ".a", phrase: "restored")],
+            previewBasis: [TextReplacement(shortcut: ".a", phrase: "old")],
+            configuration: .init()
+        )
+        check(false, "changed bulk preview basis requires a new confirmation")
+    } catch ApplyCoordinatorError.changedBasis(let diff) {
+        check(diff.edited.count == 1, "changed bulk preview basis requires a new confirmation")
+    }
+
+    let failingGateway = InMemoryGateway([], writeError: TestError.writerFailure)
+    let failingCoordinator = ApplyCoordinator(reader: failingGateway, writer: failingGateway, snapshots: snapshots)
+    do {
+        _ = try await failingCoordinator.apply(
+            .add(.init(shortcut: ".partial", phrase: "Partial")),
+            configuration: .init()
+        )
+        check(false, "writer failure reports observed partial state")
+    } catch ApplyCoordinatorError.partialResult(let observed, _) {
+        check(observed.isEmpty, "writer failure reports observed partial state")
+    }
+}
+
+@MainActor
+func run() async throws {
     try testPlistCodec()
     try testConfigurationStore()
     try testSnapshotStore()
     testReplacementDiff()
     try testMacPreferencesAndFallback()
+    try await testApplyCoordinator()
 }
 
 do {
-    try run()
+    try await run()
 } catch {
     failures += 1
     print("FAIL: unexpected error: \(error)")

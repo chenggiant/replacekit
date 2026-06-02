@@ -50,15 +50,14 @@ private struct SystemSettingsSheetResolver: Sendable {
 
         let clock = ContinuousClock()
         let launchDeadline = clock.now.advanced(by: .seconds(5))
-        var attemptedOpen = false
+        var requestedOpen = false
         while clock.now < launchDeadline {
             if let root = await settingsRoot() {
                 if let sheet = uniqueTextReplacementsSheet(in: root) {
                     return sheet
                 }
-                if !attemptedOpen {
-                    attemptedOpen = true
-                    try? openTextReplacementsSheet(in: root)
+                if !requestedOpen {
+                    requestedOpen = (try? openTextReplacementsSheet(in: root)) == true
                 }
             }
             try await Task.sleep(for: .milliseconds(200))
@@ -86,7 +85,7 @@ private struct SystemSettingsSheetResolver: Sendable {
         return sheets.count == 1 ? sheets[0] : nil
     }
 
-    private func openTextReplacementsSheet(in root: AXElement) throws {
+    private func openTextReplacementsSheet(in root: AXElement) throws -> Bool {
         let buttons = root.descendants.filter {
             $0.role == (kAXButtonRole as String) &&
                 ($0.label?.hasPrefix("Text Replacements") == true ||
@@ -94,17 +93,18 @@ private struct SystemSettingsSheetResolver: Sendable {
         }
         if buttons.count == 1 {
             try buttons[0].press()
-            return
+            return true
         }
 
         let labels = root.descendants.filter {
             $0.role == (kAXStaticTextRole as String) &&
                 ($0.value == "Text replacements" || $0.title == "Text replacements")
         }
-        guard labels.count == 1 else {
-            throw SystemSettingsWriterError.textReplacementsSheetUnavailable
+        if labels.count == 1 {
+            try labels[0].clickAtCenter()
+            return true
         }
-        try labels[0].clickAtCenter()
+        return false
     }
 }
 

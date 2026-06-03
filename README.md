@@ -16,8 +16,10 @@ Scripts/package-app.sh
 open outputs/ReplaceKit.app
 ```
 
-`Scripts/package-app.sh` creates an ad-hoc signed Finder-launchable app at
-`outputs/ReplaceKit.app`.
+`Scripts/package-app.sh` creates a Finder-launchable app at
+`outputs/ReplaceKit.app`. If a local `ReplaceKit Local Code Signing` identity
+exists, the script uses it so macOS Accessibility approval survives rebuilds.
+Otherwise it falls back to ad-hoc signing.
 
 ## First Launch
 

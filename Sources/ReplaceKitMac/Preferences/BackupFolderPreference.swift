@@ -9,10 +9,11 @@ public struct BackupFolderPreference: @unchecked Sendable {
     }
 
     public func load() -> URL? {
-        defaults.string(forKey: key).map(URL.init(fileURLWithPath:))
+        guard let storedPath = defaults.string(forKey: key) else { return nil }
+        return URL(fileURLWithPath: storedPath.removingPercentEncoding ?? storedPath)
     }
 
     public func save(_ folder: URL?) {
-        defaults.set(folder?.path(), forKey: key)
+        defaults.set(folder?.path(percentEncoded: false), forKey: key)
     }
 }

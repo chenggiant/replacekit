@@ -181,6 +181,20 @@ func testMacPreferencesAndFallback() throws {
     preference.save(folder)
     check(preference.load() == folder, "backup folder preference persists selected path")
 
+    let spacedFolder = URL(fileURLWithPath: "/tmp/ReplaceKit Space")
+    preference.save(spacedFolder)
+    check(
+        defaults.string(forKey: "backupFolderPath") == "/tmp/ReplaceKit Space",
+        "backup folder preference stores decoded file paths"
+    )
+    check(preference.load() == spacedFolder, "backup folder preference loads decoded file paths")
+
+    defaults.set("/tmp/ReplaceKit%20Legacy", forKey: "backupFolderPath")
+    check(
+        preference.load() == URL(fileURLWithPath: "/tmp/ReplaceKit Legacy"),
+        "backup folder preference loads legacy percent-encoded paths"
+    )
+
     defer { try? FileManager.default.removeItem(at: folder) }
     let fallbackURL = try ManualImportService().export(
         [TextReplacement(shortcut: ".fallback", phrase: "Fallback")],

@@ -126,6 +126,34 @@ func testReplacementDiff() {
 }
 
 @MainActor
+func testRoutineEditPlanning() throws {
+    let current = [TextReplacement(shortcut: ".a", phrase: "Alpha")]
+    let configuration = ReplaceKitConfiguration(tagsByShortcut: [".a": ["old"]])
+
+    let tagOnly = try RoutineEditPlanner.planUpdate(
+        current: current,
+        configuration: configuration,
+        originalShortcut: ".a",
+        shortcut: ".a",
+        phrase: "Alpha",
+        tags: ["new"]
+    )
+    check(!tagOnly.changesAppleRecords, "tag-only save skips System Settings writer")
+    check(tagOnly.proposed == current, "tag-only save keeps Apple records unchanged")
+    check(tagOnly.nextConfiguration.tagsByShortcut == [".a": ["new"]], "tag-only save updates local tags")
+
+    let phraseEdit = try RoutineEditPlanner.planUpdate(
+        current: current,
+        configuration: configuration,
+        originalShortcut: ".a",
+        shortcut: ".a",
+        phrase: "Edited",
+        tags: ["new"]
+    )
+    check(phraseEdit.changesAppleRecords, "phrase save still uses System Settings writer")
+}
+
+@MainActor
 func testMacPreferencesAndFallback() throws {
     let reader = GlobalDefaultsTextReplacementReader(loadRecords: {
         [
@@ -300,6 +328,7 @@ func run() async throws {
     try testConfigurationStore()
     try testSnapshotStore()
     testReplacementDiff()
+    try testRoutineEditPlanning()
     try testMacPreferencesAndFallback()
     try await testApplyCoordinator()
 }

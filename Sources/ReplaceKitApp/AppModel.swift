@@ -173,26 +173,51 @@ final class AppModel {
         phrase: String,
         tags: Set<String>
     ) async {
-        guard !shortcut.isEmpty else {
+        do {
+            let plan = try RoutineEditPlanner.planUpdate(
+                current: replacements,
+                configuration: configuration,
+                originalShortcut: originalShortcut,
+                shortcut: shortcut,
+                phrase: phrase,
+                tags: tags
+            )
+            guard let mutation = plan.mutation else {
+                saveMetadataOnly(plan.nextConfiguration)
+                return
+            }
+            await apply(.init(
+                mutation: mutation,
+                proposed: plan.proposed,
+                nextConfiguration: plan.nextConfiguration
+            ))
+        } catch ReplacementValidationError.emptyShortcut {
             errorMessage = "Shortcut cannot be empty."
-            return
-        }
-        guard !replacements.contains(where: {
-            $0.shortcut == shortcut && $0.shortcut != originalShortcut
-        }) else {
+        } catch ReplacementValidationError.duplicateShortcut(let shortcut) {
             errorMessage = "Shortcut \(shortcut) already exists."
+        } catch {
+            errorMessage = "Could not prepare change: \(error)"
+        }
+    }
+
+    private func saveMetadataOnly(_ nextConfiguration: ReplaceKitConfiguration) {
+        guard let backupFolder else {
+            errorMessage = "Choose a backup folder before saving tags."
             return
         }
-        var nextConfiguration = configuration.renamingShortcut(from: originalShortcut, to: shortcut)
-        nextConfiguration.tagsByShortcut[shortcut] = tags
-        let replacement = TextReplacement(shortcut: shortcut, phrase: phrase)
-        let proposed = replacements
-            .filter { $0.shortcut != originalShortcut } + [replacement]
-        await apply(.init(
-            mutation: .update(originalShortcut: originalShortcut, replacement: replacement),
-            proposed: proposed.sorted { $0.shortcut < $1.shortcut },
-            nextConfiguration: nextConfiguration
-        ))
+        do {
+            _ = try SnapshotStore(folder: backupFolder, codec: .init()).writeSnapshot(
+                replacements: try reader.fetchAll(),
+                configuration: configuration,
+                reason: .beforeEdit
+            )
+            configuration = nextConfiguration
+            try ConfigurationStore(folder: backupFolder).save(configuration)
+            pendingProtectedApply = nil
+            loadHistory()
+        } catch {
+            errorMessage = "Could not save tags: \(error)"
+        }
     }
 
     func deleteSelected() async {

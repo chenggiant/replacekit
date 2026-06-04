@@ -37,7 +37,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.isShowingDiffPreview) {
             DiffPreviewView(model: model)
         }
-        .alert("ReplaceKit", isPresented: Binding(
+        .alert("Could Not Complete Action", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )) {

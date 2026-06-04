@@ -18,10 +18,50 @@ struct PendingRoutineEdit {
     let nextConfiguration: ReplaceKitConfiguration
 }
 
+enum BulkEditSource {
+    case plistImport(filename: String)
+    case snapshotRestore(timestamp: Date)
+    case multiDelete(count: Int)
+
+    var title: String {
+        switch self {
+        case .plistImport:
+            "Review Import"
+        case .snapshotRestore(let timestamp):
+            "Restore Snapshot from \(timestamp.formatted(date: .abbreviated, time: .omitted))"
+        case .multiDelete(let count):
+            "Review Deletion of \(count) Replacements"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .plistImport(let filename):
+            "Review how \(filename) will change Apple's Text Replacements before applying it."
+        case .snapshotRestore:
+            "Review how this snapshot will change Apple's Text Replacements before restoring it."
+        case .multiDelete:
+            "Review the selected replacements before deleting them."
+        }
+    }
+
+    var confirmationTitle: String {
+        switch self {
+        case .plistImport:
+            "Apply Import"
+        case .snapshotRestore:
+            "Restore Snapshot"
+        case .multiDelete(let count):
+            "Delete \(count) Replacements"
+        }
+    }
+}
+
 struct PendingBulkEdit {
     let proposed: [TextReplacement]
     var previewBasis: [TextReplacement]
     let nextConfiguration: ReplaceKitConfiguration
+    let source: BulkEditSource
 }
 
 enum PendingProtectedApply {
@@ -62,18 +102,24 @@ final class AppModel {
     var isBusy = false
 
     private let reader: any TextReplacementReading
-    private let writer: any TextReplacementWriting
+    private let systemSettingsWriter: any TextReplacementWriting
+    private let quietSystemSettingsWriter: any TextReplacementWriting
+    private let directDefaultsWriter: any TextReplacementWriting
     private let backupFolderPreference: BackupFolderPreference
     private let manualImportService: ManualImportService
 
     init(
         reader: any TextReplacementReading,
         writer: any TextReplacementWriting,
+        quietSystemSettingsWriter: (any TextReplacementWriting)? = nil,
+        directDefaultsWriter: any TextReplacementWriting = GlobalDefaultsTextReplacementWriter(),
         backupFolderPreference: BackupFolderPreference = .init(),
         manualImportService: ManualImportService = .init()
     ) {
         self.reader = reader
-        self.writer = writer
+        self.systemSettingsWriter = writer
+        self.quietSystemSettingsWriter = quietSystemSettingsWriter ?? writer
+        self.directDefaultsWriter = directDefaultsWriter
         self.backupFolderPreference = backupFolderPreference
         self.manualImportService = manualImportService
         backupFolder = backupFolderPreference.load()
@@ -82,8 +128,23 @@ final class AppModel {
     static func live() -> AppModel {
         AppModel(
             reader: GlobalDefaultsTextReplacementReader(),
-            writer: SystemSettingsTextReplacementWriter()
+            writer: SystemSettingsTextReplacementWriter(),
+            quietSystemSettingsWriter: SystemSettingsTextReplacementWriter(presentationMode: .quiet)
         )
+    }
+
+    private var activeWriter: any TextReplacementWriting {
+        switch configuration.writeMode {
+        case .systemSettings:
+            switch configuration.systemSettingsApplyMode {
+            case .standard:
+                systemSettingsWriter
+            case .quiet:
+                quietSystemSettingsWriter
+            }
+        case .directDefaultsExperimental:
+            directDefaultsWriter
+        }
     }
 
     var allTags: [String] {
@@ -311,7 +372,11 @@ final class AppModel {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let proposed = try TextReplacementPlistCodec().decode(Data(contentsOf: url))
-            prepareBulk(proposed: proposed, nextConfiguration: configuration)
+            prepareBulk(
+                proposed: proposed,
+                nextConfiguration: configuration,
+                source: .plistImport(filename: url.lastPathComponent)
+            )
         } catch {
             errorMessage = "Import failed: \(error)"
         }
@@ -322,7 +387,11 @@ final class AppModel {
             let proposed = try TextReplacementPlistCodec().decode(Data(contentsOf: snapshot.plistURL))
             var nextConfiguration = configuration
             nextConfiguration.tagsByShortcut = snapshot.metadata.tagsByShortcut
-            prepareBulk(proposed: proposed, nextConfiguration: nextConfiguration)
+            prepareBulk(
+                proposed: proposed,
+                nextConfiguration: nextConfiguration,
+                source: .snapshotRestore(timestamp: snapshot.metadata.timestamp)
+            )
         } catch {
             errorMessage = "Could not read snapshot: \(error)"
         }
@@ -335,7 +404,8 @@ final class AppModel {
         }
         prepareBulk(
             proposed: replacements.filter { !shortcuts.contains($0.shortcut) },
-            nextConfiguration: nextConfiguration
+            nextConfiguration: nextConfiguration,
+            source: .multiDelete(count: shortcuts.count)
         )
     }
 
@@ -399,7 +469,7 @@ final class AppModel {
         defer { isBusy = false }
         let coordinator = ApplyCoordinator(
             reader: reader,
-            writer: writer,
+            writer: activeWriter,
             snapshots: snapshotWriter()
         )
         do {
@@ -418,7 +488,7 @@ final class AppModel {
             errorMessage = "Choose a writable backup folder or apply this edit once without a snapshot."
         } catch ApplyCoordinatorError.partialResult(let observed, let message) {
             replacements = observed
-            errorMessage = "System Settings applied only part of the change: \(message)"
+            errorMessage = "macOS applied only part of the change: \(message)"
             exportFallbackPlist(edit.proposed)
         } catch {
             errorMessage = "Could not apply change: \(error)"
@@ -428,12 +498,14 @@ final class AppModel {
 
     private func prepareBulk(
         proposed: [TextReplacement],
-        nextConfiguration: ReplaceKitConfiguration
+        nextConfiguration: ReplaceKitConfiguration,
+        source: BulkEditSource
     ) {
         let edit = PendingBulkEdit(
             proposed: proposed.sorted { $0.shortcut < $1.shortcut },
             previewBasis: replacements,
-            nextConfiguration: nextConfiguration
+            nextConfiguration: nextConfiguration,
+            source: source
         )
         pendingBulkEdit = edit
         pendingDiff = .compare(current: replacements, proposed: edit.proposed)
@@ -448,7 +520,7 @@ final class AppModel {
         defer { isBusy = false }
         let coordinator = ApplyCoordinator(
             reader: reader,
-            writer: writer,
+            writer: activeWriter,
             snapshots: snapshotWriter()
         )
         do {
@@ -476,7 +548,7 @@ final class AppModel {
             errorMessage = "Choose a writable backup folder or apply these changes once without a snapshot."
         } catch ApplyCoordinatorError.partialResult(let observed, let message) {
             replacements = observed
-            errorMessage = "System Settings applied only part of the bulk change: \(message)"
+            errorMessage = "macOS applied only part of the bulk change: \(message)"
             exportFallbackPlist(edit.proposed)
         } catch {
             errorMessage = "Could not apply bulk change: \(error)"

@@ -78,6 +78,14 @@ public struct AXElement: @unchecked Sendable {
         try set(attribute: kAXValueAttribute as CFString, value: value as CFString)
     }
 
+    public func setPosition(_ point: CGPoint) throws {
+        var point = point
+        guard let value = AXValueCreate(.cgPoint, &point) else {
+            throw AXElementError.eventCreationFailed
+        }
+        try set(attribute: kAXPositionAttribute as CFString, value: value)
+    }
+
     public func select() throws {
         try set(attribute: kAXSelectedAttribute as CFString, value: kCFBooleanTrue)
     }

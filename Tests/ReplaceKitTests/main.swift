@@ -61,7 +61,9 @@ func testConfigurationStore() throws {
     let store = ConfigurationStore(folder: folder)
     let configuration = ReplaceKitConfiguration(
         tagsByShortcut: [".hello": ["work", "greeting"]],
-        createDailySnapshotOnOpen: true
+        createDailySnapshotOnOpen: true,
+        writeMode: .directDefaultsExperimental,
+        systemSettingsApplyMode: .standard
     )
 
     try store.save(configuration)
@@ -70,6 +72,44 @@ func testConfigurationStore() throws {
     check(
         configuration.renamingShortcut(from: ".hello", to: ".hi").tagsByShortcut == [".hi": ["work", "greeting"]],
         "renaming shortcut migrates tags"
+    )
+
+    let legacyConfigurationData = """
+    {
+      "schemaVersion" : 1,
+      "tagsByShortcut" : {
+        ".legacy" : ["old"]
+      },
+      "createDailySnapshotOnOpen" : true
+    }
+    """.data(using: .utf8)!
+    let legacyConfiguration = try JSONDecoder().decode(
+        ReplaceKitConfiguration.self,
+        from: legacyConfigurationData
+    )
+    check(
+        legacyConfiguration.writeMode == .systemSettings,
+        "legacy configuration defaults to System Settings write mode"
+    )
+    check(
+        legacyConfiguration.systemSettingsApplyMode == .quiet,
+        "legacy configuration defaults to quiet System Settings apply"
+    )
+    check(
+        ReplacementWriteMode.systemSettings.displayName == "System Settings + iCloud (Recommended)",
+        "System Settings mode is presented as the recommended sync path"
+    )
+    check(
+        ReplacementWriteMode.directDefaultsExperimental.displayName == "Local Only (Experimental)",
+        "direct defaults mode is presented as local-only"
+    )
+    check(
+        ReplacementWriteMode.systemSettings.saveActionTitle == "Save to Mac & iCloud",
+        "System Settings mode save action describes its outcome"
+    )
+    check(
+        ReplacementWriteMode.directDefaultsExperimental.saveActionTitle == "Save Locally",
+        "direct defaults mode save action describes its outcome"
     )
 }
 
@@ -99,6 +139,9 @@ func testSnapshotStore() throws {
     check(duplicate == nil, "identical snapshot content and tags are deduplicated")
     let snapshots = try store.list()
     check(snapshots.count == 1, "snapshot list contains one deduplicated snapshot")
+    check(SnapshotReason.manual.displayName == "Manual backup", "manual snapshot reason is user-readable")
+    check(SnapshotReason.beforeEdit.displayName == "Before edit", "edit snapshot reason is user-readable")
+    check(SnapshotReason.dailyOpen.displayName == "Daily app-open backup", "daily snapshot reason is user-readable")
 }
 
 @MainActor
@@ -154,7 +197,13 @@ func testRoutineEditPlanning() throws {
 }
 
 @MainActor
-func testMacPreferencesAndFallback() throws {
+func testMacPreferencesAndFallback() async throws {
+    check(
+        SystemSettingsWriterError.accessibilityPermissionMissing.localizedDescription ==
+            "Accessibility permission is required to save through System Settings.",
+        "System Settings writer errors are user-readable"
+    )
+
     let reader = GlobalDefaultsTextReplacementReader(loadRecords: {
         [
             ["replace": ".ph", "with": 91471286, "on": 1],
@@ -172,6 +221,48 @@ func testMacPreferencesAndFallback() throws {
     checkThrows("global defaults reader reports missing preference") {
         _ = try GlobalDefaultsTextReplacementReader(loadRecords: { nil }).fetchAll()
     }
+
+    var directDomain: [String: Any] = [
+        "UnrelatedPreference": true,
+        "NSUserDictionaryReplacementItems": [
+            ["replace": ".a", "with": "Alpha", "on": 1],
+            ["replace": ".b", "with": "Bravo", "on": 1],
+        ],
+    ]
+    let directWriter = GlobalDefaultsTextReplacementWriter(
+        loadDomain: { directDomain },
+        saveDomain: { directDomain = $0 }
+    )
+    let directReader = GlobalDefaultsTextReplacementReader(loadRecords: {
+        directDomain["NSUserDictionaryReplacementItems"] as? [[String: Any]]
+    })
+
+    try await directWriter.add(.init(shortcut: ".c", phrase: "Charlie"))
+    let addedDirectReplacements = try directReader.fetchAll()
+    check(
+        addedDirectReplacements.map(\.shortcut) == [".a", ".b", ".c"],
+        "direct defaults writer adds a replacement without dropping existing records"
+    )
+
+    try await directWriter.update(
+        originalShortcut: ".b",
+        replacement: .init(shortcut: ".bb", phrase: "Bravo edited")
+    )
+    let updatedDirectReplacements = try directReader.fetchAll()
+    check(
+        updatedDirectReplacements.contains(.init(shortcut: ".bb", phrase: "Bravo edited")),
+        "direct defaults writer updates and renames replacements"
+    )
+
+    try await directWriter.delete(shortcut: ".a")
+    let deletedDirectReplacements = try directReader.fetchAll()
+    let directRecords = directDomain["NSUserDictionaryReplacementItems"] as? [[String: Any]]
+    check(
+        deletedDirectReplacements.map(\.shortcut) == [".bb", ".c"],
+        "direct defaults writer deletes replacements"
+    )
+    check(directDomain["UnrelatedPreference"] as? Bool == true, "direct defaults writer preserves unrelated global preferences")
+    check(directRecords?.allSatisfy { ($0["on"] as? Int) == 1 } == true, "direct defaults writer writes enabled Apple records")
 
     let suite = "replacekit-tests-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -334,6 +425,28 @@ func testApplyCoordinator() async throws {
     } catch ApplyCoordinatorError.partialResult(let observed, _) {
         check(observed.isEmpty, "writer failure reports observed partial state")
     }
+
+    let accessibilityGateway = InMemoryGateway(
+        [],
+        writeError: SystemSettingsWriterError.accessibilityPermissionMissing
+    )
+    let accessibilityCoordinator = ApplyCoordinator(
+        reader: accessibilityGateway,
+        writer: accessibilityGateway,
+        snapshots: snapshots
+    )
+    do {
+        _ = try await accessibilityCoordinator.apply(
+            .add(.init(shortcut: ".permission", phrase: "Permission")),
+            configuration: .init()
+        )
+        check(false, "partial writer failures use user-readable messages")
+    } catch ApplyCoordinatorError.partialResult(_, let message) {
+        check(
+            message == "Accessibility permission is required to save through System Settings.",
+            "partial writer failures use user-readable messages"
+        )
+    }
 }
 
 @MainActor
@@ -343,7 +456,7 @@ func run() async throws {
     try testSnapshotStore()
     testReplacementDiff()
     try testRoutineEditPlanning()
-    try testMacPreferencesAndFallback()
+    try await testMacPreferencesAndFallback()
     try await testApplyCoordinator()
 }
 

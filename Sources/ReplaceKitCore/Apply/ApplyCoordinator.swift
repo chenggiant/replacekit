@@ -76,7 +76,7 @@ public actor ApplyCoordinator {
         } catch {
             throw ApplyCoordinatorError.partialResult(
                 observed: (try? reader.fetchAll()) ?? [],
-                message: String(describing: error)
+                message: error.localizedDescription
             )
         }
         return try await verifiedResult(expected: expected)
@@ -112,7 +112,7 @@ public actor ApplyCoordinator {
         } catch {
             throw ApplyCoordinatorError.partialResult(
                 observed: (try? reader.fetchAll()) ?? [],
-                message: String(describing: error)
+                message: error.localizedDescription
             )
         }
         return try await verifiedResult(expected: proposed)

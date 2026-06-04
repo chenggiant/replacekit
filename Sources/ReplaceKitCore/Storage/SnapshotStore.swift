@@ -4,6 +4,17 @@ public enum SnapshotReason: String, Codable, Sendable {
     case manual
     case beforeEdit
     case dailyOpen
+
+    public var displayName: String {
+        switch self {
+        case .manual:
+            "Manual backup"
+        case .beforeEdit:
+            "Before edit"
+        case .dailyOpen:
+            "Daily app-open backup"
+        }
+    }
 }
 
 public struct SnapshotMetadata: Codable, Equatable, Sendable {

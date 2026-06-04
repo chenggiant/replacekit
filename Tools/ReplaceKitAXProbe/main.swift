@@ -21,11 +21,13 @@ func eventually(_ predicate: () throws -> Bool) async throws -> Bool {
 }
 
 if CommandLine.arguments.contains("--smoke-write") {
+    let presentationMode: SystemSettingsPresentationMode =
+        CommandLine.arguments.contains("--quiet") ? .quiet : .standard
     let shortcut = ".replacekit-\(UUID().uuidString.prefix(8))"
     let initial = TextReplacement(shortcut: shortcut, phrase: "ReplaceKit smoke test")
     let edited = TextReplacement(shortcut: shortcut, phrase: "ReplaceKit smoke test edited")
     let reader = GlobalDefaultsTextReplacementReader()
-    let writer = SystemSettingsTextReplacementWriter()
+    let writer = SystemSettingsTextReplacementWriter(presentationMode: presentationMode)
 
     do {
         try await writer.add(initial)

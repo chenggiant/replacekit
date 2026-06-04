@@ -3,20 +3,63 @@ import ApplicationServices
 import Foundation
 import ReplaceKitCore
 
-public enum SystemSettingsWriterError: Error {
+public enum SystemSettingsWriterError: Error, LocalizedError {
     case accessibilityPermissionMissing
     case settingsUnavailable
     case textReplacementsSheetUnavailable
     case unexpectedSheetShape(String)
     case replacementNotFound(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .accessibilityPermissionMissing:
+            "Accessibility permission is required to save through System Settings."
+        case .settingsUnavailable:
+            "System Settings is unavailable."
+        case .textReplacementsSheetUnavailable:
+            "Text Replacements could not be opened in System Settings."
+        case .unexpectedSheetShape:
+            "System Settings did not expose the expected Text Replacements controls."
+        case .replacementNotFound(let shortcut):
+            "The replacement \"\(shortcut)\" could not be found in System Settings."
+        }
+    }
+}
+
+public enum SystemSettingsPresentationMode: Equatable, Sendable {
+    case standard
+    case quiet
 }
 
 public actor SystemSettingsTextReplacementWriter: TextReplacementWriting {
-    private let resolver = SystemSettingsSheetResolver()
+    private let presentationMode: SystemSettingsPresentationMode
+    private let resolver: SystemSettingsSheetResolver
 
-    public init() {}
+    public init(presentationMode: SystemSettingsPresentationMode = .standard) {
+        self.presentationMode = presentationMode
+        self.resolver = SystemSettingsSheetResolver(presentationMode: presentationMode)
+    }
 
     public func add(_ replacement: TextReplacement) async throws {
+        try await performSystemSettingsWrite {
+            try await addResolved(replacement)
+        }
+    }
+
+    public func update(originalShortcut: String, replacement: TextReplacement) async throws {
+        try await performSystemSettingsWrite {
+            try await deleteResolved(shortcut: originalShortcut)
+            try await addResolved(replacement)
+        }
+    }
+
+    public func delete(shortcut: String) async throws {
+        try await performSystemSettingsWrite {
+            try await deleteResolved(shortcut: shortcut)
+        }
+    }
+
+    private func addResolved(_ replacement: TextReplacement) async throws {
         let sheet = try await resolver.resolveTextReplacementsSheet()
         try MacOS26TextReplacementSheet(sheet: sheet).add(
             shortcut: replacement.shortcut,
@@ -24,20 +67,36 @@ public actor SystemSettingsTextReplacementWriter: TextReplacementWriting {
         )
     }
 
-    public func update(originalShortcut: String, replacement: TextReplacement) async throws {
-        try await delete(shortcut: originalShortcut)
-        try await add(replacement)
-    }
-
-    public func delete(shortcut: String) async throws {
+    private func deleteResolved(shortcut: String) async throws {
         let sheet = try await resolver.resolveTextReplacementsSheet()
         try MacOS26TextReplacementSheet(sheet: sheet).delete(shortcut: shortcut)
     }
 
+    private func performSystemSettingsWrite(_ operation: () async throws -> Void) async throws {
+        let context = await MainActor.run {
+            SystemSettingsQuietAutomation.begin(mode: presentationMode)
+        }
+        do {
+            try await operation()
+            await MainActor.run {
+                SystemSettingsQuietAutomation.finish(context, mode: presentationMode)
+            }
+        } catch {
+            await MainActor.run {
+                SystemSettingsQuietAutomation.finish(context, mode: presentationMode)
+            }
+            throw error
+        }
+    }
 }
 
 private struct SystemSettingsSheetResolver: Sendable {
     private let settingsURL = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!
+    private let presentationMode: SystemSettingsPresentationMode
+
+    init(presentationMode: SystemSettingsPresentationMode) {
+        self.presentationMode = presentationMode
+    }
 
     func resolveTextReplacementsSheet() async throws -> AXElement {
         guard AccessibilityTrust().isTrusted(prompt: true) else {
@@ -74,7 +133,9 @@ private struct SystemSettingsSheetResolver: Sendable {
             return nil
         }
         app.activate()
-        return AXElement(AXUIElementCreateApplication(app.processIdentifier))
+        let root = AXElement(AXUIElementCreateApplication(app.processIdentifier))
+        SystemSettingsQuietAutomation.placeSettingsWindowQuietly(root, mode: presentationMode)
+        return root
     }
 
     private func uniqueTextReplacementsSheet(in root: AXElement) -> AXElement? {
@@ -105,6 +166,58 @@ private struct SystemSettingsSheetResolver: Sendable {
             return true
         }
         return false
+    }
+}
+
+private struct SystemSettingsQuietContext: Sendable {
+    let frontmostProcessIdentifier: pid_t?
+    let wasSystemSettingsFrontmost: Bool
+}
+
+@MainActor
+private enum SystemSettingsQuietAutomation {
+    static func begin(mode: SystemSettingsPresentationMode) -> SystemSettingsQuietContext? {
+        guard mode == .quiet else { return nil }
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        return SystemSettingsQuietContext(
+            frontmostProcessIdentifier: frontmost?.processIdentifier,
+            wasSystemSettingsFrontmost: frontmost?.bundleIdentifier == "com.apple.systempreferences"
+        )
+    }
+
+    static func placeSettingsWindowQuietly(
+        _ root: AXElement,
+        mode: SystemSettingsPresentationMode
+    ) {
+        guard mode == .quiet, let visibleFrame = NSScreen.main?.visibleFrame else {
+            return
+        }
+        for window in root.children where window.role == (kAXWindowRole as String) {
+            let size = window.size ?? CGSize(width: 760, height: 560)
+            let point = CGPoint(
+                x: max(visibleFrame.minX + 12, visibleFrame.maxX - size.width - 12),
+                y: max(visibleFrame.minY + 12, visibleFrame.maxY - size.height - 12)
+            )
+            try? window.setPosition(point)
+        }
+    }
+
+    static func finish(
+        _ context: SystemSettingsQuietContext?,
+        mode: SystemSettingsPresentationMode
+    ) {
+        guard mode == .quiet, let context else { return }
+        if !context.wasSystemSettingsFrontmost {
+            NSRunningApplication
+                .runningApplications(withBundleIdentifier: "com.apple.systempreferences")
+                .first?
+                .hide()
+        }
+        if let processIdentifier = context.frontmostProcessIdentifier,
+           let app = NSRunningApplication(processIdentifier: processIdentifier)
+        {
+            app.activate()
+        }
     }
 }
 

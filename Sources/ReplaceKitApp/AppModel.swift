@@ -21,7 +21,7 @@ struct PendingRoutineEdit {
 enum BulkEditSource {
     case plistImport(filename: String)
     case snapshotRestore(timestamp: Date)
-    case multiDelete(count: Int)
+    case delete(shortcuts: [String])
 
     var title: String {
         switch self {
@@ -29,8 +29,8 @@ enum BulkEditSource {
             "Review Import"
         case .snapshotRestore(let timestamp):
             "Restore Snapshot from \(timestamp.formatted(date: .abbreviated, time: .omitted))"
-        case .multiDelete(let count):
-            "Review Deletion of \(count) Replacements"
+        case .delete(let shortcuts):
+            shortcuts.count == 1 ? "Review Deletion" : "Review Deletion of \(shortcuts.count) Replacements"
         }
     }
 
@@ -40,8 +40,12 @@ enum BulkEditSource {
             "Review how \(filename) will change Apple's Text Replacements before applying it."
         case .snapshotRestore:
             "Review how this snapshot will change Apple's Text Replacements before restoring it."
-        case .multiDelete:
-            "Review the selected replacements before deleting them."
+        case .delete(let shortcuts):
+            if let shortcut = shortcuts.first, shortcuts.count == 1 {
+                "Review \(shortcut) before deleting it from Apple's Text Replacements."
+            } else {
+                "Review the selected replacements before deleting them from Apple's Text Replacements."
+            }
         }
     }
 
@@ -51,8 +55,8 @@ enum BulkEditSource {
             "Apply Import"
         case .snapshotRestore:
             "Restore Snapshot"
-        case .multiDelete(let count):
-            "Delete \(count) Replacements"
+        case .delete(let shortcuts):
+            shortcuts.count == 1 ? "Delete Replacement" : "Delete \(shortcuts.count) Replacements"
         }
     }
 }
@@ -96,9 +100,11 @@ final class AppModel {
     var pendingDiff: ReplacementDiff?
     var pendingBulkEdit: PendingBulkEdit?
     var isShowingDiffPreview = false
+    var isShowingAddReplacement = false
     var pendingProtectedApply: PendingProtectedApply?
     var fallbackPlistURL: URL?
     var errorMessage: String?
+    var historyErrorMessage: String?
     var isBusy = false
 
     private let reader: any TextReplacementReading
@@ -168,11 +174,24 @@ final class AppModel {
         }
     }
 
+    var visibleSelectedShortcuts: Set<String> {
+        selectedShortcuts.intersection(Set(filteredReplacements.map(\.shortcut)))
+    }
+
     var selectedReplacement: TextReplacement? {
-        guard selectedShortcuts.count == 1, let shortcut = selectedShortcuts.first else {
+        let visibleSelection = visibleSelectedShortcuts
+        guard visibleSelection.count == 1, let shortcut = visibleSelection.first else {
             return nil
         }
         return replacements.first { $0.shortcut == shortcut }
+    }
+
+    var deleteSelectionTitle: String {
+        visibleSelectedShortcuts.count <= 1 ? "Delete Replacement" : "Delete \(visibleSelectedShortcuts.count) Replacements"
+    }
+
+    func pruneSelectionToVisibleReplacements() {
+        selectedShortcuts.formIntersection(Set(filteredReplacements.map(\.shortcut)))
     }
 
     var accessibilityTrusted: Bool {
@@ -282,19 +301,9 @@ final class AppModel {
     }
 
     func deleteSelected() async {
-        guard !selectedShortcuts.isEmpty else { return }
-        if selectedShortcuts.count > 1 {
-            previewDelete(shortcuts: selectedShortcuts)
-            return
-        }
-        guard let shortcut = selectedShortcuts.first else { return }
-        var nextConfiguration = configuration
-        nextConfiguration.tagsByShortcut.removeValue(forKey: shortcut)
-        await apply(.init(
-            mutation: .delete(shortcut: shortcut),
-            proposed: replacements.filter { $0.shortcut != shortcut },
-            nextConfiguration: nextConfiguration
-        ))
+        let shortcuts = visibleSelectedShortcuts
+        guard !shortcuts.isEmpty else { return }
+        previewDelete(shortcuts: shortcuts)
     }
 
     func applyPendingWithoutSnapshot() async {
@@ -354,13 +363,22 @@ final class AppModel {
     func loadHistory() {
         guard let backupFolder else {
             snapshots = []
+            historyErrorMessage = nil
             return
         }
         do {
             snapshots = try SnapshotStore(folder: backupFolder, codec: .init()).list()
+            historyErrorMessage = nil
         } catch {
-            errorMessage = "Could not load history: \(error)"
+            snapshots = []
+            historyErrorMessage = "Could not load snapshots from \(backupFolder.path(percentEncoded: false)): \(error.localizedDescription)"
+            errorMessage = "Could not load history: \(error.localizedDescription)"
         }
+    }
+
+    func revealBackupFolder() {
+        guard let backupFolder else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([backupFolder])
     }
 
     func importPlist() {
@@ -398,6 +416,7 @@ final class AppModel {
     }
 
     func previewDelete(shortcuts: Set<String>) {
+        let sortedShortcuts = shortcuts.sorted()
         var nextConfiguration = configuration
         for shortcut in shortcuts {
             nextConfiguration.tagsByShortcut.removeValue(forKey: shortcut)
@@ -405,7 +424,7 @@ final class AppModel {
         prepareBulk(
             proposed: replacements.filter { !shortcuts.contains($0.shortcut) },
             nextConfiguration: nextConfiguration,
-            source: .multiDelete(count: shortcuts.count)
+            source: .delete(shortcuts: sortedShortcuts)
         )
     }
 
@@ -488,10 +507,10 @@ final class AppModel {
             errorMessage = "Choose a writable backup folder or apply this edit once without a snapshot."
         } catch ApplyCoordinatorError.partialResult(let observed, let message) {
             replacements = observed
-            errorMessage = "macOS applied only part of the change: \(message)"
+            errorMessage = "macOS applied only part of the change. ReplaceKit refreshed the current list, created a fallback plist, and kept the pre-change snapshot when one was available. Details: \(message)"
             exportFallbackPlist(edit.proposed)
         } catch {
-            errorMessage = "Could not apply change: \(error)"
+            errorMessage = "Could not apply change. The replacement may be unchanged. ReplaceKit created a fallback plist you can import manually. Details: \(error.localizedDescription)"
             exportFallbackPlist(edit.proposed)
         }
     }
@@ -548,10 +567,10 @@ final class AppModel {
             errorMessage = "Choose a writable backup folder or apply these changes once without a snapshot."
         } catch ApplyCoordinatorError.partialResult(let observed, let message) {
             replacements = observed
-            errorMessage = "macOS applied only part of the bulk change: \(message)"
+            errorMessage = "macOS applied only part of these changes. ReplaceKit refreshed the current list, created a fallback plist, and kept the pre-change snapshot when one was available. Details: \(message)"
             exportFallbackPlist(edit.proposed)
         } catch {
-            errorMessage = "Could not apply bulk change: \(error)"
+            errorMessage = "Could not apply these changes. The current Text Replacements may be unchanged. ReplaceKit created a fallback plist you can import manually. Details: \(error.localizedDescription)"
             exportFallbackPlist(edit.proposed)
         }
     }

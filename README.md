@@ -17,9 +17,9 @@ open outputs/ReplaceKit.app
 ```
 
 `Scripts/package-app.sh` creates a Finder-launchable app at
-`outputs/ReplaceKit.app`. If a local `ReplaceKit Local Code Signing` identity
-exists, the script uses it so macOS Accessibility approval survives rebuilds.
-Otherwise it falls back to ad-hoc signing.
+`outputs/ReplaceKit.app`. The script uses ad-hoc signing by default. To preserve
+macOS Accessibility approval across rebuilds with a trusted local identity, run
+it with `REPLACEKIT_CODESIGN_IDENTITY="ReplaceKit Local Code Signing"`.
 
 ## First Launch
 

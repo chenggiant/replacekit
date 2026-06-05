@@ -10,9 +10,19 @@ struct ContentView: View {
                     .tag(SidebarSelection.all)
 
                 Section("Tags") {
-                    ForEach(model.allTags, id: \.self) { tag in
-                        Text(tag)
-                            .tag(SidebarSelection.tag(tag))
+                    if model.allTags.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("No tags yet")
+                                .foregroundStyle(.secondary)
+                            Text("Add in inspector")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    } else {
+                        ForEach(model.allTags, id: \.self) { tag in
+                            Text(tag)
+                                .tag(SidebarSelection.tag(tag))
+                        }
                     }
                 }
 
@@ -41,6 +51,16 @@ struct ContentView: View {
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
+            if model.fallbackPlistURL != nil {
+                Button("Reveal Fallback Plist") {
+                    model.revealFallbackPlist()
+                    model.errorMessage = nil
+                }
+                Button("Open Keyboard Settings") {
+                    model.openKeyboardSettings()
+                    model.errorMessage = nil
+                }
+            }
             Button("OK") {
                 model.errorMessage = nil
             }

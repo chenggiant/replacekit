@@ -142,6 +142,90 @@ func testSnapshotStore() throws {
     check(SnapshotReason.manual.displayName == "Manual backup", "manual snapshot reason is user-readable")
     check(SnapshotReason.beforeEdit.displayName == "Before edit", "edit snapshot reason is user-readable")
     check(SnapshotReason.dailyOpen.displayName == "Daily app-open backup", "daily snapshot reason is user-readable")
+
+    let snapshotsFolder = folder.appending(path: "snapshots")
+    let badMetadataURL = snapshotsFolder.appending(path: "legacy.metadata.json")
+    try "{ bad json".write(to: badMetadataURL, atomically: true, encoding: .utf8)
+    let tolerantSnapshots = try store.list()
+    check(
+        tolerantSnapshots.map(\.metadata.timestamp) == [now],
+        "snapshot list ignores unreadable legacy metadata"
+    )
+
+    let selectedRoot = temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: selectedRoot) }
+    let selectedSnapshotsFolder = selectedRoot.appending(path: "snapshots")
+    try FileManager.default.createDirectory(at: selectedSnapshotsFolder, withIntermediateDirectories: true)
+    let selectedFolderStore = SnapshotStore(folder: selectedSnapshotsFolder, codec: .init())
+    let directTimestamp = now.addingTimeInterval(120)
+    let directMetadata = SnapshotMetadata(
+        timestamp: directTimestamp,
+        schemaVersion: configuration.schemaVersion,
+        tagsByShortcut: configuration.tagsByShortcut,
+        reason: .manual
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    try store.codec.encode(replacements).write(
+        to: selectedSnapshotsFolder.appending(path: "direct.plist"),
+        options: .atomic
+    )
+    try encoder.encode(directMetadata).write(
+        to: selectedSnapshotsFolder.appending(path: "direct.metadata.json"),
+        options: .atomic
+    )
+    let selectedFolderSnapshots = try selectedFolderStore.list()
+    check(
+        selectedFolderSnapshots.map(\.metadata.timestamp) == [directTimestamp],
+        "snapshot list supports a selected snapshots folder"
+    )
+
+    let writtenSelectedFolderSnapshot = try selectedFolderStore.writeSnapshot(
+        replacements: [.init(shortcut: ".b", phrase: "B")],
+        configuration: ReplaceKitConfiguration(tagsByShortcut: [".b": ["personal"]]),
+        reason: .beforeEdit,
+        now: now.addingTimeInterval(180)
+    )
+    let writtenFolderPath = writtenSelectedFolderSnapshot?.plistURL
+        .deletingLastPathComponent()
+        .standardizedFileURL
+        .path(percentEncoded: false)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    let selectedFolderPath = selectedSnapshotsFolder
+        .standardizedFileURL
+        .path(percentEncoded: false)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    check(
+        writtenFolderPath == selectedFolderPath,
+        "snapshot writer does not create nested snapshots folder when selected folder is already snapshots"
+    )
+
+    let spacedRoot = temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: spacedRoot) }
+    let spacedSnapshotsFolder = spacedRoot
+        .appending(path: "folder with spaces")
+        .appending(path: "snapshots")
+    try FileManager.default.createDirectory(at: spacedSnapshotsFolder, withIntermediateDirectories: true)
+    let spacedTimestamp = now.addingTimeInterval(240)
+    let spacedMetadata = SnapshotMetadata(
+        timestamp: spacedTimestamp,
+        schemaVersion: configuration.schemaVersion,
+        tagsByShortcut: configuration.tagsByShortcut,
+        reason: .manual
+    )
+    try store.codec.encode(replacements).write(
+        to: spacedSnapshotsFolder.appending(path: "spaced.plist"),
+        options: .atomic
+    )
+    try encoder.encode(spacedMetadata).write(
+        to: spacedSnapshotsFolder.appending(path: "spaced.metadata.json"),
+        options: .atomic
+    )
+    let spacedSnapshots = try SnapshotStore(folder: spacedSnapshotsFolder, codec: .init()).list()
+    check(
+        spacedSnapshots.map(\.metadata.timestamp) == [spacedTimestamp],
+        "snapshot list supports backup folders with spaces"
+    )
 }
 
 @MainActor

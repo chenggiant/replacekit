@@ -59,6 +59,10 @@ public struct SnapshotStore: Sendable {
         self.codec = codec
     }
 
+    private var snapshotsFolder: URL {
+        folder.lastPathComponent == "snapshots" ? folder : folder.appending(path: "snapshots")
+    }
+
     public func writeSnapshot(
         replacements: [TextReplacement],
         configuration: ReplaceKitConfiguration,
@@ -79,7 +83,6 @@ public struct SnapshotStore: Sendable {
             return nil
         }
 
-        let snapshotsFolder = folder.appending(path: "snapshots")
         try FileManager.default.createDirectory(at: snapshotsFolder, withIntermediateDirectories: true)
 
         let formatter = ISO8601DateFormatter()
@@ -97,25 +100,49 @@ public struct SnapshotStore: Sendable {
     }
 
     public func list() throws -> [Snapshot] {
-        let snapshotsFolder = folder.appending(path: "snapshots")
-        guard FileManager.default.fileExists(atPath: snapshotsFolder.path()) else {
-            return []
-        }
-
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try FileManager.default
-            .contentsOfDirectory(at: snapshotsFolder, includingPropertiesForKeys: nil)
-            .filter { $0.lastPathComponent.hasSuffix(".metadata.json") }
-            .map { metadataURL in
-                let metadata = try decoder.decode(SnapshotMetadata.self, from: Data(contentsOf: metadataURL))
-                let stem = metadataURL.lastPathComponent.replacingOccurrences(of: ".metadata.json", with: "")
-                return Snapshot(
-                    plistURL: snapshotsFolder.appending(path: "\(stem).plist"),
-                    metadataURL: metadataURL,
-                    metadata: metadata
-                )
+        return try snapshotFoldersToRead()
+            .flatMap { folder in
+                try FileManager.default
+                    .contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+                    .filter { $0.lastPathComponent.hasSuffix(".metadata.json") }
+                    .compactMap { metadataURL -> Snapshot? in
+                        guard let metadata = try? decoder.decode(
+                            SnapshotMetadata.self,
+                            from: Data(contentsOf: metadataURL)
+                        ) else {
+                            return nil
+                        }
+                        let stem = metadataURL.lastPathComponent.replacingOccurrences(of: ".metadata.json", with: "")
+                        let plistURL = folder.appending(path: "\(stem).plist")
+                        guard FileManager.default.fileExists(atPath: plistURL.path(percentEncoded: false)) else {
+                            return nil
+                        }
+                        return Snapshot(
+                            plistURL: plistURL,
+                            metadataURL: metadataURL,
+                            metadata: metadata
+                        )
+                    }
             }
             .sorted { $0.metadata.timestamp > $1.metadata.timestamp }
+    }
+
+    private func snapshotFoldersToRead() -> [URL] {
+        let candidates = [
+            snapshotsFolder,
+            folder.appending(path: "snapshots"),
+            folder,
+        ]
+        return candidates.reduce(into: [URL]()) { folders, candidate in
+            guard FileManager.default.fileExists(atPath: candidate.path(percentEncoded: false)) else {
+                return
+            }
+            guard !folders.contains(candidate) else {
+                return
+            }
+            folders.append(candidate)
+        }
     }
 }

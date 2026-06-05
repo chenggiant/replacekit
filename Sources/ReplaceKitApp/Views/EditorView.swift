@@ -3,7 +3,6 @@ import SwiftUI
 
 struct EditorView: View {
     @Bindable var model: AppModel
-    @State private var isAdding = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,19 +12,19 @@ struct EditorView: View {
 
             HSplitView {
                 replacementTable
-                    .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
 
                 if let replacement = model.selectedReplacement {
                     ReplacementInspector(model: model, replacement: replacement)
                         .id("\(replacement.shortcut)|\(replacement.phrase)")
-                        .frame(minWidth: 300, idealWidth: 340, maxHeight: .infinity)
+                        .frame(minWidth: 400, idealWidth: 440, maxHeight: .infinity)
                 } else {
                     ContentUnavailableView(
                         "Select a replacement",
-                        systemImage: "text.cursor",
+                        systemImage: "text.badge.checkmark",
                         description: Text("Choose one row to edit its shortcut, phrase, and tags.")
                     )
-                    .frame(minWidth: 300, idealWidth: 340, maxHeight: .infinity)
+                    .frame(minWidth: 400, idealWidth: 440, maxHeight: .infinity)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -36,12 +35,13 @@ struct EditorView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    isAdding = true
+                    model.isShowingAddReplacement = true
                 } label: {
                     Label("Add Replacement", systemImage: "plus")
                         .labelStyle(.titleAndIcon)
                 }
                 .help("Add a text replacement")
+                .keyboardShortcut("n", modifiers: .command)
                 .disabled(model.isBusy)
             }
 
@@ -53,15 +53,17 @@ struct EditorView: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .help("Import a Text Replacements plist")
+                .keyboardShortcut("o", modifiers: .command)
                 .disabled(model.isBusy)
 
                 Button {
                     model.backUpNow()
                 } label: {
-                    Label("Back Up", systemImage: "externaldrive.badge.plus")
+                    Label("Back Up Now", systemImage: "externaldrive.badge.plus")
                         .labelStyle(.titleAndIcon)
                 }
                 .help("Create a backup snapshot")
+                .keyboardShortcut("b", modifiers: .command)
                 .disabled(model.isBusy)
             }
 
@@ -69,15 +71,22 @@ struct EditorView: View {
                 Button(role: .destructive) {
                     Task { await model.deleteSelected() }
                 } label: {
-                    Label("Delete Selected", systemImage: "trash")
+                    Label(model.deleteSelectionTitle, systemImage: "trash")
                         .labelStyle(.titleAndIcon)
                 }
                 .help("Delete the selected replacements")
-                .disabled(model.selectedShortcuts.isEmpty || model.isBusy)
+                .keyboardShortcut(.delete, modifiers: [])
+                .disabled(model.visibleSelectedShortcuts.isEmpty || model.isBusy)
             }
         }
-        .sheet(isPresented: $isAdding) {
-            AddReplacementSheet(model: model, isPresented: $isAdding)
+        .sheet(isPresented: $model.isShowingAddReplacement) {
+            AddReplacementSheet(model: model, isPresented: $model.isShowingAddReplacement)
+        }
+        .onChange(of: model.searchText) {
+            model.pruneSelectionToVisibleReplacements()
+        }
+        .onChange(of: model.sidebarSelection) {
+            model.pruneSelectionToVisibleReplacements()
         }
     }
 
@@ -190,6 +199,7 @@ private struct AddReplacementSheet: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
@@ -213,6 +223,7 @@ private struct AddReplacementSheet: View {
                     }
                 }
                 .disabled(shortcut.isEmpty || model.isBusy)
+                .keyboardShortcut(.defaultAction)
             }
         }
     }
@@ -259,20 +270,29 @@ private struct ReplacementInspector: View {
 
             Divider()
 
-            Form {
-                Section("Replacement") {
-                    TextField("Shortcut", text: $shortcut)
-                    TextField("Phrase", text: $phrase, axis: .vertical)
-                        .lineLimit(6...14)
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    InspectorField("Shortcut") {
+                        TextField("Shortcut", text: $shortcut)
+                            .textFieldStyle(.roundedBorder)
+                    }
 
-                Section("ReplaceKit Tags") {
-                    TextField("Tags", text: $tags, prompt: Text("work, personal"))
-                    Text("Tags are ReplaceKit-only metadata. They do not sync to iPhone or iPad.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    InspectorField("Phrase") {
+                        TextField("Phrase", text: $phrase, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(6...14)
+                    }
+
+                    InspectorField("ReplaceKit Tags") {
+                        TextField("work, personal", text: $tags)
+                            .textFieldStyle(.roundedBorder)
+                        Text("Tags are ReplaceKit-only metadata. They do not sync to iPhone or iPad.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .padding(20)
             }
             .disabled(model.isBusy)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -280,10 +300,11 @@ private struct ReplacementInspector: View {
             Divider()
 
             HStack {
-                Button("Delete", role: .destructive) {
+                Button("Delete Replacement", role: .destructive) {
                     Task { await model.deleteSelected() }
                 }
-                .disabled(model.isBusy)
+                .keyboardShortcut(.delete, modifiers: [])
+                .disabled(model.visibleSelectedShortcuts.isEmpty || model.isBusy)
 
                 Spacer()
 
@@ -306,6 +327,7 @@ private struct ReplacementInspector: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut("s", modifiers: .command)
                 .disabled(shortcut.isEmpty || !isDirty || model.isBusy)
             }
             .padding()
@@ -356,6 +378,24 @@ private struct TagSummary: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+}
+
+private struct InspectorField<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.headline)
+            content
         }
     }
 }

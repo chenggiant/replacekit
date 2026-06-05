@@ -23,7 +23,25 @@ struct HistoryView: View {
 
             Divider()
 
-            if model.snapshots.isEmpty {
+            if let historyErrorMessage = model.historyErrorMessage {
+                VStack(spacing: 12) {
+                    ContentUnavailableView(
+                        "Could not load history",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(historyErrorMessage)
+                    )
+
+                    HStack {
+                        Button("Reveal Backup Folder") {
+                            model.revealBackupFolder()
+                        }
+                        Button("Choose Folder") {
+                            model.chooseBackupFolder()
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.snapshots.isEmpty {
                 ContentUnavailableView(
                     "No snapshots yet",
                     systemImage: "clock.arrow.circlepath",

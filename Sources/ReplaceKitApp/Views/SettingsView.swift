@@ -23,13 +23,13 @@ struct SettingsView: View {
                     model.chooseBackupFolder()
                 }
 
-                Toggle(
-                    "Create at most one daily snapshot when app opens",
-                    isOn: $model.configuration.createDailySnapshotOnOpen
-                )
+                Toggle("Create a daily backup when ReplaceKit opens", isOn: $model.configuration.createDailySnapshotOnOpen)
                 .onChange(of: model.configuration.createDailySnapshotOnOpen) {
                     model.saveConfiguration()
                 }
+                Text("At most once per day.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Saving & Sync") {
@@ -68,8 +68,14 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
 
                     HStack {
-                        Button("Request Accessibility Permission") {
-                            model.requestAccessibilityPermission()
+                        if model.accessibilityTrusted {
+                            Button("Open Accessibility Settings") {
+                                model.openAccessibilitySettings()
+                            }
+                        } else {
+                            Button("Request Accessibility Permission") {
+                                model.requestAccessibilityPermission()
+                            }
                         }
                         Button("Open Keyboard Settings") {
                             model.openKeyboardSettings()

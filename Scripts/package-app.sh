@@ -6,11 +6,18 @@ swift build -c release --product ReplaceKit
 
 APP="$PWD/outputs/ReplaceKit.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/release/ReplaceKit" "$APP/Contents/MacOS/ReplaceKit"
 cp "Resources/Info.plist" "$APP/Contents/Info.plist"
-SIGN_IDENTITY="${REPLACEKIT_CODESIGN_IDENTITY:--}"
+cp "Resources/ReplaceKit.icns" "$APP/Contents/Resources/ReplaceKit.icns"
+SIGN_IDENTITY="${REPLACEKIT_CODESIGN_IDENTITY:-}"
 VALID_IDENTITIES="$(security find-identity -v -p codesigning)"
+if [[ -z "$SIGN_IDENTITY" ]] && grep -Fq '"ReplaceKit Local Code Signing"' <<< "$VALID_IDENTITIES"; then
+  SIGN_IDENTITY="ReplaceKit Local Code Signing"
+fi
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  SIGN_IDENTITY="-"
+fi
 if [[ "$SIGN_IDENTITY" != "-" ]] && ! grep -Fq "\"$SIGN_IDENTITY\"" <<< "$VALID_IDENTITIES"; then
   SIGN_IDENTITY="-"
 fi

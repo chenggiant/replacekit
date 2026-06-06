@@ -37,7 +37,7 @@ Download the latest `ReplaceKit-macOS.zip` from
 [GitHub Releases](../../releases/latest), unzip it, and move
 `ReplaceKit.app` to `/Applications`.
 
-The current app bundle is locally signed but not notarized with Apple Developer
+The current app bundle is ad-hoc signed and not notarized with Apple Developer
 ID. On first launch, macOS may require one of these steps:
 
 1. Right-click `ReplaceKit.app` and choose **Open**.

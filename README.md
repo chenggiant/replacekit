@@ -136,8 +136,10 @@ macOS Accessibility approval across rebuilds. Set
 Build and package the app, then zip the bundle without flattening it:
 
 ```bash
+REPLACEKIT_APP_PATH="$PWD/outputs/release/ReplaceKit.app" \
+REPLACEKIT_CODESIGN_IDENTITY="-" \
 Scripts/package-app.sh
-COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent outputs/ReplaceKit.app outputs/ReplaceKit-macOS.zip
+COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent outputs/release/ReplaceKit.app outputs/ReplaceKit-macOS.zip
 ```
 
 Upload `outputs/ReplaceKit-macOS.zip` as a GitHub Release asset.

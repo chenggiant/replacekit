@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 swift build -c release --product ReplaceKit
 
-APP="$PWD/outputs/ReplaceKit.app"
+APP="${REPLACEKIT_APP_PATH:-$PWD/outputs/ReplaceKit.app}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/release/ReplaceKit" "$APP/Contents/MacOS/ReplaceKit"

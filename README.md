@@ -1,62 +1,84 @@
 # ReplaceKit
 
-ReplaceKit is a native macOS utility for Apple's built-in Text Replacements. It
-keeps Apple's storage and iCloud sync path in charge while adding a searchable
-editor, lightweight tags, versioned plist backups, guarded import and restore,
-and a manual fallback when Settings automation cannot complete.
+<p align="center">
+  <img src="Resources/ReplaceKitAppIcon.png" alt="ReplaceKit app icon" width="128">
+</p>
 
-## Build
+ReplaceKit is a native macOS utility for managing Apple’s built-in Text
+Replacements without replacing Apple’s storage or iCloud sync path.
 
-This project builds with Apple's Command Line Tools:
+It gives you a searchable editor, local tags, versioned backups, guarded import
+and restore, and a safer workflow for changes that would otherwise require
+manually dragging plist files in and out of System Settings.
 
-```bash
-swift run ReplaceKitTests
-swift build
-Scripts/package-app.sh
-open outputs/ReplaceKit.app
-```
+Requires macOS 14 or newer.
 
-`Scripts/package-app.sh` creates a Finder-launchable app at
-`outputs/ReplaceKit.app`. When the local `ReplaceKit Local Code Signing`
-identity is available, the script uses it automatically so macOS Accessibility
-approval survives rebuilds. Set `REPLACEKIT_CODESIGN_IDENTITY="-"` to force
-ad-hoc signing.
+## What It Does
 
-## First Launch
+- Search and edit your current macOS Text Replacements.
+- Add lightweight ReplaceKit-only tags for organization.
+- Create plist snapshots before changes.
+- Browse backup history and preview restores before applying them.
+- Import Apple-compatible plist files with a diff review.
+- Fall back to Apple’s documented drag-in plist workflow when automation fails.
+- Keep iPhone and iPad sync on Apple’s normal iCloud Text Replacements path.
 
-1. Open ReplaceKit.
-2. Choose a writable backup folder. This can be an ordinary local folder, an
-   iCloud Drive folder, or a folder inside an existing Git working tree.
-3. Open Settings in ReplaceKit and choose a write mode.
-4. If you keep the default Safe mode, grant Accessibility permission when
-   prompted.
+## Download
 
-Accessibility permission is required only so ReplaceKit can operate Apple's Text
-Replacements panel in System Settings.
+Download the latest `ReplaceKit-macOS.zip` from
+[GitHub Releases](../../releases/latest), unzip it, and move
+`ReplaceKit.app` to `/Applications`.
+
+The current app bundle is locally signed but not notarized with Apple Developer
+ID. On first launch, macOS may require one of these steps:
+
+1. Right-click `ReplaceKit.app` and choose **Open**.
+2. Or open System Settings > Privacy & Security and allow the app.
+
+After first launch:
+
+1. Choose a writable backup folder.
+2. Keep the default write mode if you want normal Apple/iCloud sync.
+3. Grant Accessibility permission when ReplaceKit asks.
+
+## Privacy
+
+ReplaceKit is a local Mac app. It does not use a server, analytics, telemetry,
+or cloud account of its own. Your replacement plist snapshots and ReplaceKit tag
+metadata are stored in the backup folder you choose.
+
+Apple’s Text Replacements and iCloud sync remain handled by macOS and iCloud.
+
+## Why Accessibility Is Needed
+
+Apple does not publish an API for writing Text Replacements. ReplaceKit’s safe
+mode drives Apple’s own System Settings UI through macOS Accessibility so
+Apple’s interface remains the writer of system data.
+
+This is the reliable path for changes that should sync to iPhone and iPad
+through Apple’s existing iCloud Text Replacements behavior.
 
 ## Write Modes
 
-ReplaceKit has two write modes:
+ReplaceKit has two write modes.
 
-- **Safe: System Settings + iCloud** is the default. It opens Apple's Keyboard
-  settings page and applies edits through the visible Text Replacements UI. Use
-  this mode when you need iPhone/iPad sync. Quiet apply is enabled by default:
-  ReplaceKit moves Settings to the edge, applies the edit, hides Settings, and
-  restores the previously active app. It still briefly controls the real System
-  Settings UI.
-- **Experimental: Silent Local Write** writes
-  `NSUserDictionaryReplacementItems` in the macOS global defaults domain
-  directly. It does not open System Settings and does not need Accessibility
-  permission, but Apple does not document this as a supported write API. Treat
-  it as local-only; it does not reliably publish changes into Apple's iCloud
-  TextInput sync path.
+**Safe: System Settings + iCloud** is the recommended default. It opens Apple’s
+Keyboard settings page and applies edits through the visible Text Replacements
+UI. Quiet apply is enabled by default: ReplaceKit moves Settings to the edge,
+applies the edit, hides Settings, and restores your previous app.
 
-Both modes still create a pre-change snapshot before editing, unless you
-explicitly apply once without snapshot protection.
+**Experimental: Silent Local Write** writes
+`NSUserDictionaryReplacementItems` in the macOS global defaults domain directly.
+It does not open System Settings and does not need Accessibility permission, but
+Apple does not document this as a supported write API. Treat it as local-only;
+it does not reliably publish changes into Apple’s iCloud TextInput sync path.
 
-## Backup Folder
+Both modes create a pre-change snapshot before editing unless you explicitly
+apply once without snapshot protection.
 
-ReplaceKit stores ordinary files:
+## Backups And Tags
+
+ReplaceKit stores ordinary files in your chosen backup folder:
 
 ```text
 Text Replacements Backups/
@@ -66,44 +88,81 @@ Text Replacements Backups/
   replacekit.json
 ```
 
-The plist files contain Apple replacement records. JSON files contain ReplaceKit
-metadata such as tags and backup reasons. Tags remain ReplaceKit-only and do not
-appear on iPhone or iPad.
+The plist files contain Apple replacement records. JSON files contain
+ReplaceKit metadata such as tags and backup reasons.
+
+Tags are ReplaceKit-only metadata. They do not appear in Apple’s plist format
+and do not sync to iPhone or iPad.
 
 ## Manual Fallback
 
-If Settings automation cannot finish, ReplaceKit generates
-`property list.plist` and reveals it in Finder. Open System Settings, go to
-Keyboard > Text Input > Text Replacements, then drag the plist into the list.
+If System Settings automation cannot finish, ReplaceKit generates an
+Apple-compatible `property list.plist` and reveals it in Finder. You can then
+open System Settings > Keyboard > Text Input > Text Replacements and drag the
+plist into the list.
 
-Apple documents this plist backup and restore workflow in
-[Back up and share text replacements on Mac](https://support.apple.com/en-mt/guide/mac-help/mchl2a7bd795/mac).
+Apple documents this backup and restore workflow in
+[Back up and share text replacements on Mac](https://support.apple.com/guide/mac-help/mchl2a7bd795/mac).
 
-## Compatibility Boundary
+## Build From Source
 
-Apple does not publish an API for managing Text Replacements. ReplaceKit reads
-the observed `NSUserDictionaryReplacementItems` global preference to refresh its
-editor. Safe mode writes through Apple's Settings UI and is the expected path
-for iCloud sync. Experimental silent mode writes the observed preference
-directly, which can update local state but should not be relied on for iCloud
-sync.
+ReplaceKit builds with Apple’s Command Line Tools:
+
+```bash
+swift run ReplaceKitTests
+swift build
+Scripts/package-app.sh
+open outputs/ReplaceKit.app
+```
+
+`Scripts/package-app.sh` creates a Finder-launchable app at
+`outputs/ReplaceKit.app`.
+
+For local development, the script automatically uses a local
+`ReplaceKit Local Code Signing` identity when one is available. This preserves
+macOS Accessibility approval across rebuilds. Set
+`REPLACEKIT_CODESIGN_IDENTITY="-"` to force ad-hoc signing.
+
+## Create A Release Zip
+
+Build and package the app, then zip the bundle without flattening it:
+
+```bash
+Scripts/package-app.sh
+ditto -c -k --keepParent outputs/ReplaceKit.app outputs/ReplaceKit-macOS.zip
+```
+
+Upload `outputs/ReplaceKit-macOS.zip` as a GitHub Release asset.
 
 ## Diagnostic Probe
 
-To inspect the current System Settings Accessibility tree:
+Inspect the current System Settings Accessibility tree:
 
 ```bash
 swift run ReplaceKitAXProbe
 ```
 
-To run a disposable add, update, and delete smoke test through System Settings:
+Run a disposable add, update, and delete smoke test through System Settings:
 
 ```bash
 swift run ReplaceKitAXProbe --smoke-write
 ```
 
-To run the same smoke test with quiet presentation:
+Run the same smoke test with quiet presentation:
 
 ```bash
 swift run ReplaceKitAXProbe --smoke-write --quiet
 ```
+
+## Compatibility Boundary
+
+ReplaceKit intentionally avoids private framework writes as its default path.
+It reads the observed `NSUserDictionaryReplacementItems` global preference to
+refresh the editor, but safe writes go through Apple’s Settings UI.
+
+If Apple changes the System Settings Text Replacements interface, ReplaceKit may
+need an update. Existing snapshots remain Apple-compatible plist files.
+
+## License
+
+No open-source license has been selected yet.

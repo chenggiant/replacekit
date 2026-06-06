@@ -651,13 +651,13 @@ import Testing
 @Test func convertsObservedGlobalDefaultsShape() throws {
     let reader = GlobalDefaultsTextReplacementReader(loadRecords: {
         [
-            ["replace": ".ph", "with": 91471286, "on": 1],
+            ["replace": ".num", "with": 123456, "on": 1],
             ["replace": "omw", "with": "On my way!", "on": 1],
         ]
     })
 
     #expect(try reader.fetchAll() == [
-        TextReplacement(shortcut: ".ph", phrase: "91471286"),
+        TextReplacement(shortcut: ".num", phrase: "123456"),
         TextReplacement(shortcut: "omw", phrase: "On my way!"),
     ])
 }

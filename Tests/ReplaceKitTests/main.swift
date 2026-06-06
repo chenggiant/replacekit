@@ -290,14 +290,14 @@ func testMacPreferencesAndFallback() async throws {
 
     let reader = GlobalDefaultsTextReplacementReader(loadRecords: {
         [
-            ["replace": ".ph", "with": 91471286, "on": 1],
+            ["replace": ".num", "with": 123456, "on": 1],
             ["replace": "omw", "with": "On my way!", "on": 1],
         ]
     })
     let observed = try reader.fetchAll()
     check(
         observed == [
-            TextReplacement(shortcut: ".ph", phrase: "91471286"),
+            TextReplacement(shortcut: ".num", phrase: "123456"),
             TextReplacement(shortcut: "omw", phrase: "On my way!"),
         ],
         "global defaults reader converts observed macOS records"

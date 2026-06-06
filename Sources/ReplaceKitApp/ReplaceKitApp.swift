@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct ReplaceKitApp: App {
-    @State private var model = AppModel.live()
+    @State private var model = AppModel.runtime()
 
     var body: some Scene {
         WindowGroup {

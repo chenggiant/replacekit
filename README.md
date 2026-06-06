@@ -23,6 +23,14 @@ Requires macOS 14 or newer.
 - Fall back to Apple’s documented drag-in plist workflow when automation fails.
 - Keep iPhone and iPad sync on Apple’s normal iCloud Text Replacements path.
 
+## Screenshots
+
+The screenshots below are captured from the real app with dummy replacement data.
+
+![ReplaceKit editor showing searchable text replacements and local tags](docs/assets/replacekit-editor.png)
+
+![ReplaceKit settings showing backup and safe iCloud sync options](docs/assets/replacekit-settings.png)
+
 ## Download
 
 Download the latest `ReplaceKit-macOS.zip` from
@@ -129,7 +137,7 @@ Build and package the app, then zip the bundle without flattening it:
 
 ```bash
 Scripts/package-app.sh
-ditto -c -k --keepParent outputs/ReplaceKit.app outputs/ReplaceKit-macOS.zip
+COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent outputs/ReplaceKit.app outputs/ReplaceKit-macOS.zip
 ```
 
 Upload `outputs/ReplaceKit-macOS.zip` as a GitHub Release asset.

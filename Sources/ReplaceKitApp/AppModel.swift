@@ -113,6 +113,8 @@ final class AppModel {
     private let directDefaultsWriter: any TextReplacementWriting
     private let backupFolderPreference: BackupFolderPreference
     private let manualImportService: ManualImportService
+    private let loadBackupFolderData: Bool
+    private let accessibilityTrustedOverride: Bool?
 
     init(
         reader: any TextReplacementReading,
@@ -120,7 +122,9 @@ final class AppModel {
         quietSystemSettingsWriter: (any TextReplacementWriting)? = nil,
         directDefaultsWriter: any TextReplacementWriting = GlobalDefaultsTextReplacementWriter(),
         backupFolderPreference: BackupFolderPreference = .init(),
-        manualImportService: ManualImportService = .init()
+        manualImportService: ManualImportService = .init(),
+        loadBackupFolderData: Bool = true,
+        accessibilityTrustedOverride: Bool? = nil
     ) {
         self.reader = reader
         self.systemSettingsWriter = writer
@@ -128,6 +132,8 @@ final class AppModel {
         self.directDefaultsWriter = directDefaultsWriter
         self.backupFolderPreference = backupFolderPreference
         self.manualImportService = manualImportService
+        self.loadBackupFolderData = loadBackupFolderData
+        self.accessibilityTrustedOverride = accessibilityTrustedOverride
         backupFolder = backupFolderPreference.load()
     }
 
@@ -195,13 +201,16 @@ final class AppModel {
     }
 
     var accessibilityTrusted: Bool {
-        AccessibilityTrust().isTrusted(prompt: false)
+        if let accessibilityTrustedOverride {
+            return accessibilityTrustedOverride
+        }
+        return AccessibilityTrust().isTrusted(prompt: false)
     }
 
     func refresh() {
         do {
             replacements = try reader.fetchAll()
-            if let backupFolder {
+            if loadBackupFolderData, let backupFolder {
                 configuration = try ConfigurationStore(folder: backupFolder).load()
                 snapshots = try SnapshotStore(folder: backupFolder, codec: .init()).list()
             }
@@ -335,6 +344,7 @@ final class AppModel {
 
     func createDailySnapshotIfEnabled() {
         guard
+            loadBackupFolderData,
             configuration.createDailySnapshotOnOpen,
             let backupFolder
         else {
@@ -361,6 +371,10 @@ final class AppModel {
     }
 
     func loadHistory() {
+        guard loadBackupFolderData else {
+            historyErrorMessage = nil
+            return
+        }
         guard let backupFolder else {
             snapshots = []
             historyErrorMessage = nil
@@ -440,7 +454,7 @@ final class AppModel {
     }
 
     func saveConfiguration() {
-        guard let backupFolder else { return }
+        guard loadBackupFolderData, let backupFolder else { return }
         do {
             try ConfigurationStore(folder: backupFolder).save(configuration)
         } catch {
@@ -583,7 +597,7 @@ final class AppModel {
     }
 
     private func saveConfigurationIfPossible() throws {
-        guard let backupFolder else { return }
+        guard loadBackupFolderData, let backupFolder else { return }
         try ConfigurationStore(folder: backupFolder).save(configuration)
     }
 }
